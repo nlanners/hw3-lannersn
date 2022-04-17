@@ -70,7 +70,20 @@ async function patch_boat(id, name, type, length) {
 
 function delete_boat(id) {
     const key = datastore.key([BOAT, parseInt(id,10)]);
-    return datastore.delete(key);
+    get_all_slips().then( (slips) => {
+        for (const slip of slips) {
+            if (slip.current_boat == id) {
+                slip.current_boat = null;
+                const entity = {
+                    key: slip[Datastore.KEY],
+                    data: slip
+                }
+
+                datastore.update(entity);
+            }
+        }
+    })
+    return datastore.delete(key);    
 }
 
 function post_slip(number) {
@@ -105,6 +118,71 @@ function delete_slip(id) {
     return datastore.delete(key);
 }
 
+async function put_boat_in_slip(slip_id, boat_id) {
+    try {
+        const slips = await get_slip(slip_id);
+        const boats = await get_boat(boat_id);
+    
+        if (slips.length > 0 && boats.length > 0) {
+            const slip = slips[0];
+            if (slip.current_boat == null) {
+                slip.current_boat = boat_id;
+                const entity = {
+                    key: datastore.key([SLIP, parseInt(slip_id, 10)]),
+                    data: slip
+                };
+    
+                await datastore.update(entity);
+
+                return 1;
+    
+            } else {
+                // slip not empty
+                return -1;
+            }
+        } else {
+            // slip or boat does not exist
+            return 0;
+        }
+    } catch (err) {
+        console.log(err);
+    }  
+}
+
+async function remove_boat_from_slip(slip_id, boat_id) {
+    try {
+        const slips = await get_slip(slip_id);
+        const boats = await get_boat(boat_id);
+
+        if (slips.length > 0 && boats.length > 0) {
+            // slip and boat exist
+            const slip = slips[0];
+            if (slip.current_boat == boat_id) {
+                // boat is at the slip
+                slip.current_boat = null;
+                const entity = {
+                    key: datastore.key([SLIP, parseInt(slip_id, 10)]),
+                    data: slip
+                };
+    
+                await datastore.update(entity);
+
+                return 1;
+    
+            } else {
+                // boat not at this slip
+                return 0;
+            }
+        } else {
+            // slip or boat does not exist
+            return 0;
+        }
+
+    } catch (err) {
+        console.log(err);
+    }
+}
+
 /* Routes */
 
 // CREATE a boat in database
@@ -114,13 +192,13 @@ app.post('/boats', (req, res) => {
         .then( boat => {res.status(201).json( boat )} )
         .catch( err => {
             res.status(400).json(
-                {"Error": "Something went wrong creating the boat. Please try again."}
+                {"Error": "Something went wrong creating the boat. Please try again"}
                 )
             } 
         );
     } else {
         res.status(400).json(
-            {"Error": "The request object is missing at least one of the required attributes."}
+            {"Error": "The request object is missing at least one of the required attributes"}
         );
     }
     
@@ -153,7 +231,6 @@ app.patch('/boats/:boat_id', (req, res) => {
         patch_boat(req.params.boat_id, req.body.name, req.body.type, req.body.length)
         .then( (boat) => {
             if (boat) {
-                console.log(boat[0]);
                 res.status(200).json(boat);
             } else {
                 res.status(404).json({"Error": "No boat with this boat_id exists"});
@@ -163,7 +240,7 @@ app.patch('/boats/:boat_id', (req, res) => {
         .catch( err => console.log(err) );
     } else {
         res.status(400).json(
-            {"Error": "The request object is missing at least on of the required attributes"}
+            {"Error": "The request object is missing at least one of the required attributes"}
         );
     }
     
@@ -177,7 +254,7 @@ app.delete('/boats/:boat_id', (req, res) => {
         if(stuff[0].indexUpdates == 0) {
             res.status(404).json({"Error":"No boat with this boat_id exists"});
         } else {
-            res.status(202).end();
+            res.status(204).end();
         }
     }).catch( err => {
         console.log(err);
@@ -191,13 +268,13 @@ app.post('/slips', (req, res) => {
         .then( slip => {res.status(201).json( slip )} )
         .catch( err => {
             res.status(400).json(
-                {"Error": "Something went wrong creating the slip. Please try again."}
+                {"Error": "Something went wrong creating the slip. Please try again"}
                 )
             } 
         );
     } else {
         res.status(400).json(
-            {"Error": "The request object is missing the required number."}
+            {"Error": "The request object is missing the required number"}
         );
     }
 })
@@ -209,7 +286,7 @@ app.get('/slips/:slip_id', (req, res) => {
         if (slip.length > 0) {
             res.status(200).json(slip[0]);
         } else {
-            res.status(404).json({"Error": "No boat with this slip_id exists"});
+            res.status(404).json({"Error": "No slip with this slip_id exists"});
         }
     }).catch( err => console.log(err));
 })
@@ -228,9 +305,9 @@ app.delete('/slips/:slip_id', (req, res) => {
     delete_slip(req.params.slip_id)
     .then( (stuff) => { 
         if(stuff[0].indexUpdates == 0) {
-            res.status(404).json({"Error":"No boat with this boat_id exists"});
+            res.status(404).json({"Error":"No slip with this slip_id exists"});
         } else {
-            res.status(202).end();
+            res.status(204).end();
         }
     }).catch( err => {
         console.log(err);
@@ -239,7 +316,37 @@ app.delete('/slips/:slip_id', (req, res) => {
 
 // Boat arrives at a Slip
 app.put('/slips/:slip_id/:boat_id', (req, res) => {
-    
+    put_boat_in_slip(req.params.slip_id, req.params.boat_id)
+    .then( (result) => {
+        switch(result) {
+            case 1:
+                res.status(204).end();
+                break;
+            case 0:
+                res.status(404).json({"Error": "The specified boat and/or slip does not exist"});
+                break;
+            case -1:
+                res.status(403).json({"Error": "The slip is not empty"});
+                break;
+        }
+    }).catch( err => console.log(err));
+
+})
+
+// Boat departs a Slip
+app.delete('/slips/:slip_id/:boat_id', (req, res) => {
+    remove_boat_from_slip(req.params.slip_id, req.params.boat_id)
+    .then( (result) => {
+        switch (result) {
+            case 0:
+                res.status(404).json({"Error": "No boat with this boat_id is at the slip with this slip_id"});
+                break;
+            
+            case 1:
+                res.status(204).end();
+                break;
+        }
+    }).catch( err => console.log(err));
 })
 
 app.listen(PORT, () => {
